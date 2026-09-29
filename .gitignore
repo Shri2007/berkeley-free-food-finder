@@ -4,3 +4,4 @@ node_modules/
 .DS_Store
 .claude/skills/
 skills-lock.json
+.agents/
