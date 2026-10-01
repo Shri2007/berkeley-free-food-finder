@@ -7,8 +7,8 @@ Someone posts when and where there's free food, and everyone else sees what's ha
 - **Posts disappear by themselves.** Once an event's end time passes, it drops off the list. Nothing gets deleted: the list query only returns events where `ends_at > now()`.
 - **Berkeley time everywhere.** Times are stored in UTC and always shown in `America/Los_Angeles`, whatever time zone your device is set to.
 
-> **Status: early skeleton.** You can list events in the browser and add them through the API.
-> There's no posting form in the UI yet, and **no input validation or rate limiting yet**, so don't share the live URL widely until those are in.
+> **Status: working v1.** You can see what's happening now, what's coming up, and post an event from your phone.
+> The server still has **no input validation or rate limiting**, so don't share a live URL widely until those are in.
 
 ## Stack
 
@@ -24,7 +24,13 @@ Someone posts when and where there's free food, and everyone else sees what's ha
 ```
 berkeley-free-food-finder/
 ├── client/            React app (Vite)
-│   └── src/App.tsx    fetches /api/events and renders the list
+│   └── src/
+│       ├── App.tsx        loads events, "Happening now" / "Later today" tabs, states
+│       ├── EventRow.tsx   one event in the list
+│       ├── PostSheet.tsx  the posting form (bottom sheet on phones, dialog on laptops)
+│       ├── api.ts         the two fetch calls to the server
+│       ├── time.ts        Berkeley-time formatting and datetime-local conversion
+│       └── index.css      all styling, plain CSS, light and dark
 ├── server/            Express API
 │   └── src/
 │       ├── server.ts  entry point: creates the table, then starts listening

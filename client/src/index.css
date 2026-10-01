@@ -1,22 +1,26 @@
-/* Berkeley Free Food Finder — v0
-   Anchor: bloomberg-businessweek-turley, adapted (poster chrome, utility list).
-   Mobile-first: everything below targets a phone; the media query at the bottom widens it. */
+/* Berkeley Free Food Finder
+   Poster chrome over a utility list. Archivo Black for display, Archivo for everything else.
+   One accent (California Gold), zero radius, 2px ink rules instead of cards.
+   Mobile-first: everything below targets a phone; the media query near the end widens it. */
 
 :root {
-  --ground: #ffffff;
+  --ground: #fffdf8;
   --ink: #14110f;
   --gold: #fdb515; /* California Gold */
-  --blue: #003262; /* Berkeley Blue */
-  --chalk: #f2efe9;
+  --blue: #003262; /* Berkeley Blue, reserved for the post sheet */
+  --chalk: #f2eee6;
+  --muted: rgb(20 17 15 / 0.62);
+  --hairline: rgb(20 17 15 / 0.18);
 
   --rule: 2px solid var(--ink);
   --gutter: 16px;
   --snap: 120ms;
+  --ease-out: cubic-bezier(0.2, 0.9, 0.3, 1);
 
   color-scheme: light dark;
   background: var(--ground);
   color: var(--ink);
-  font-family: 'Archivo', 'Helvetica Neue', sans-serif;
+  font-family: 'Archivo', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-size: 17px;
   line-height: 1.45;
   text-wrap: pretty;
@@ -25,9 +29,11 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #0e0e0e;
-    --ink: #f7f5f2;
-    --chalk: #1a1917;
+    --ground: #121110;
+    --ink: #f6f3ee;
+    --chalk: #1c1a18;
+    --muted: rgb(246 243 238 / 0.62);
+    --hairline: rgb(246 243 238 / 0.2);
   }
 }
 
@@ -37,44 +43,55 @@
   box-sizing: border-box;
 }
 
+html {
+  scroll-padding-top: 56px;
+}
+
 body {
   margin: 0;
   background: var(--ground);
 }
 
+/* The sheet is modal; don't let the page scroll behind it. */
+body:has(dialog[open]) {
+  overflow: hidden;
+}
+
 .screen {
   min-height: 100dvh;
   /* room for the fixed Post button in the thumb zone */
-  padding-bottom: 96px;
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
-/* ---------- masthead: the one loud move ---------- */
-
-.masthead {
-  padding: 20px var(--gutter) 16px;
-  border-bottom: var(--rule);
-}
+/* ---------- small caps labels ---------- */
 
 .kicker,
-.event__day,
 .flag,
 .event__facts dt,
 .tally,
-.placeholder--note {
+.day-head,
+.field__optional {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
+/* ---------- masthead: the one loud move ---------- */
+
+.masthead {
+  padding: calc(16px + env(safe-area-inset-top, 0px)) var(--gutter) 16px;
+  border-bottom: var(--rule);
+}
+
 .kicker {
   margin: 0;
-  color: var(--ink);
-  opacity: 0.6;
+  color: var(--muted);
 }
 
 .masthead h1 {
   font-family: 'Archivo Black', 'Archivo', sans-serif;
+  font-weight: 400;
   font-size: clamp(3.25rem, 21vw, 6rem);
   line-height: 0.84;
   letter-spacing: -0.035em;
@@ -87,15 +104,19 @@ body {
   margin: 0;
   max-width: 34ch;
   font-size: 15px;
-  opacity: 0.75;
+  color: var(--muted);
 }
 
 /* ---------- tabs ---------- */
 
 .tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: grid;
   grid-template-columns: 1fr 1fr;
   border-bottom: var(--rule);
+  background: var(--ground);
 }
 
 .tab {
@@ -113,7 +134,7 @@ body {
   font-weight: 700;
   font-size: 15px;
   cursor: pointer;
-  transition: background var(--snap) linear;
+  transition: background var(--snap) linear, color var(--snap) linear;
 }
 
 .tab:last-child {
@@ -125,9 +146,21 @@ body {
   color: #14110f; /* gold needs the dark ink in both themes */
 }
 
-.tab:focus-visible {
+.tab:focus-visible,
+.btn:focus-visible,
+.chip:focus-visible,
+.post-fab:focus-visible {
   outline: 3px solid var(--blue);
   outline-offset: -3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tab:focus-visible,
+  .btn:focus-visible,
+  .chip:focus-visible,
+  .post-fab:focus-visible {
+    outline-color: var(--gold);
+  }
 }
 
 .tally {
@@ -144,9 +177,45 @@ body {
   list-style: none;
 }
 
+.day-head {
+  padding: 12px var(--gutter) 6px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--hairline);
+}
+
 .event {
   padding: 16px var(--gutter) 20px;
   border-bottom: var(--rule);
+  animation: rise 160ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+.event--fresh {
+  animation: rise 160ms var(--ease-out) both, flash 1.4s steps(2, end) 1;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes flash {
+  0%,
+  49% {
+    background: var(--gold);
+    color: #14110f;
+  }
+  50%,
+  100% {
+    background: transparent;
+    color: inherit;
+  }
 }
 
 .event__time {
@@ -167,18 +236,17 @@ body {
   padding: 2px 6px;
   background: var(--gold);
   color: #14110f;
-}
-
-.event__day {
-  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
 }
 
 .event__title {
   font-family: 'Archivo Black', 'Archivo', sans-serif;
+  font-weight: 400;
   font-size: clamp(1.5rem, 7vw, 2rem);
   line-height: 1.02;
   letter-spacing: -0.02em;
   margin: 0 0 12px -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .event__facts {
@@ -196,7 +264,7 @@ body {
 
 .event__facts dt {
   margin: 0;
-  opacity: 0.55;
+  color: var(--muted);
 }
 
 .event__facts dd {
@@ -223,6 +291,7 @@ body {
 
 .block__title {
   font-family: 'Archivo Black', 'Archivo', sans-serif;
+  font-weight: 400;
   font-size: clamp(1.4rem, 6vw, 1.75rem);
   line-height: 1.05;
   margin: 0 0 8px;
@@ -230,6 +299,7 @@ body {
 
 .block__body {
   margin: 0 0 16px;
+  max-width: 40ch;
   opacity: 0.8;
 }
 
@@ -280,7 +350,7 @@ body {
   transition: transform var(--snap) linear;
 }
 
-.btn:active {
+.btn:active:not(:disabled) {
   transform: translate(1px, 1px);
 }
 
@@ -291,18 +361,33 @@ body {
 }
 
 .btn--solid:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  opacity: 0.55;
+  cursor: progress;
 }
 
-.block--alert .btn {
+.btn--wide {
+  width: 100%;
+  min-height: 56px;
+  font-family: 'Archivo Black', 'Archivo', sans-serif;
+  font-weight: 400;
+  font-size: 18px;
+  text-transform: uppercase;
+}
+
+.btn--on-ink {
   border-color: var(--ground);
+}
+
+.btn--on-blue {
+  border-color: #ffffff;
+  color: #ffffff;
 }
 
 .post-fab {
   position: fixed;
   right: var(--gutter);
   bottom: calc(var(--gutter) + env(safe-area-inset-bottom, 0px));
+  z-index: 3;
   min-height: 56px;
   padding: 0 24px;
   border: var(--rule);
@@ -311,6 +396,7 @@ body {
   color: #14110f;
   font: inherit;
   font-family: 'Archivo Black', 'Archivo', sans-serif;
+  font-weight: 400;
   font-size: 17px;
   text-transform: uppercase;
   letter-spacing: -0.01em;
@@ -322,14 +408,47 @@ body {
   transform: translate(2px, 2px);
 }
 
-/* ---------- post sheet (v0 placeholder) ---------- */
+/* ---------- post sheet ---------- */
 
 .sheet {
+  /* native <dialog>: reset the UA box, then pin it to the bottom as a sheet */
   position: fixed;
-  inset: 0;
+  inset: auto 0 0 0;
+  width: 100%;
+  max-width: none;
+  max-height: calc(100dvh - 24px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-top: var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  overflow: hidden;
+}
+
+.sheet[open] {
+  animation: slide-up 200ms var(--ease-out);
+}
+
+.sheet::backdrop {
+  background: rgb(20 17 15 / 0.55);
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.sheet__form {
   display: flex;
   flex-direction: column;
-  background: var(--ground);
+  max-height: calc(100dvh - 24px);
 }
 
 .sheet__bar {
@@ -338,40 +457,130 @@ body {
   justify-content: space-between;
   gap: 12px;
   padding: 12px var(--gutter);
-  border-bottom: var(--rule);
   background: var(--blue);
   color: #ffffff;
-}
-
-.sheet__bar .btn {
-  border-color: #ffffff;
 }
 
 .sheet__title {
   margin: 0;
   font-family: 'Archivo Black', 'Archivo', sans-serif;
-  font-size: 1.5rem;
+  font-weight: 400;
+  font-size: 1.4rem;
+  line-height: 1;
   text-transform: uppercase;
 }
 
 .sheet__body {
-  padding: 24px var(--gutter);
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px var(--gutter) 16px;
 }
 
-.placeholder {
-  margin: 0 0 8px;
-  padding: 32px 16px;
-  border: 2px dashed var(--ink);
-  text-align: center;
-  opacity: 0.7;
+.sheet__actions {
+  padding: 12px var(--gutter) calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: var(--rule);
+  background: var(--ground);
 }
 
-.placeholder--note {
-  padding: 8px;
-  border-style: solid;
-  border-width: 0;
-  opacity: 0.55;
-  text-align: left;
+/* ---------- form ---------- */
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.field label {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.field__optional {
+  margin-left: 6px;
+  color: var(--muted);
+}
+
+.field input {
+  min-height: 48px;
+  padding: 0 12px;
+  border: var(--rule);
+  background: var(--ground);
+  color: var(--ink);
+  font: inherit;
+  font-size: 17px; /* 16px+ stops iOS from zooming into the field */
+}
+
+.field input::placeholder {
+  color: var(--muted);
+}
+
+.field input:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 0;
+}
+
+.field input[aria-invalid='true'] {
+  border-color: #b3261e;
+}
+
+.field__error {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #b3261e;
+}
+
+@media (prefers-color-scheme: dark) {
+  .field input[aria-invalid='true'] {
+    border-color: #ff7a6e;
+  }
+  .field__error {
+    color: #ff7a6e;
+  }
+}
+
+.field__hint {
+  margin: 12px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.field-row {
+  display: grid;
+  gap: 12px;
+}
+
+.form-alert {
+  margin: 0 0 16px;
+  padding: 12px;
+  background: var(--ink);
+  color: var(--ground);
+  font-weight: 600;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  min-height: 40px;
+  padding: 0 14px;
+  border: var(--rule);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  transition: transform var(--snap) linear;
+}
+
+.chip:active {
+  transform: translate(1px, 1px);
+  background: var(--gold);
+  color: #14110f;
 }
 
 /* ---------- wider screens ---------- */
@@ -394,6 +603,23 @@ body {
 
   .post-fab {
     right: calc(50vw - 24rem + var(--gutter));
+  }
+
+  .field-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* On a laptop the sheet becomes a centered dialog instead of a bottom sheet. */
+  .sheet {
+    inset: 0;
+    width: min(32rem, calc(100% - 48px));
+    max-height: min(44rem, calc(100dvh - 48px));
+    margin: auto;
+    border: var(--rule);
+  }
+
+  .sheet__form {
+    max-height: min(44rem, calc(100dvh - 48px));
   }
 }
 

@@ -1,17 +1,8 @@
-import { useEffect, useState } from 'react'
-import { dayLabel, minutesLeft, timeRange } from './time'
-
-// Shape of a row from GET /api/events. Timestamps arrive as UTC ISO strings.
-export interface FoodEvent {
-  id: number
-  title: string
-  location: string
-  food: string
-  host: string | null
-  starts_at: string
-  ends_at: string
-  created_at: string
-}
+import { Fragment, useCallback, useEffect, useState } from 'react'
+import { listEvents, type FoodEvent } from './api'
+import { EventRow } from './EventRow'
+import { PostSheet } from './PostSheet'
+import { dayLabel } from './time'
 
 type Tab = 'now' | 'later'
 
@@ -20,39 +11,80 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('now')
   const [posting, setPosting] = useState(false)
+  const [freshId, setFreshId] = useState<number | null>(null)
   // Kept in state so "happening now" re-evaluates while the page sits open.
   const [now, setNow] = useState(() => new Date())
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000)
-    return () => clearInterval(id)
-  }, [])
-
-  useEffect(() => {
-    const controller = new AbortController()
-
-    fetch('/api/events', { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Server responded ${res.status}`)
-        return res.json() as Promise<FoodEvent[]>
-      })
+  const load = useCallback((signal?: AbortSignal) => {
+    return listEvents(signal)
       .then((data) => {
         setEvents(data)
         setError(null)
       })
       .catch((err: unknown) => {
-        if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'Something went wrong')
+        if (signal?.aborted) return
+        // A failed background refresh shouldn't wipe a list we already have;
+        // the next refresh will quietly catch up. Only the first load shows an error.
+        setEvents((prev) => {
+          if (prev === null) setError(err instanceof Error ? err.message : 'Something went wrong')
+          return prev
+        })
       })
-
-    return () => controller.abort()
   }, [])
 
-  const happeningNow = (events ?? []).filter(
+  // First load.
+  useEffect(() => {
+    const controller = new AbortController()
+    load(controller.signal)
+    return () => controller.abort()
+  }, [load])
+
+  // Keep the list honest while the tab sits open: tick the clock every 30s,
+  // refetch every minute, and refetch when the phone comes back to the page.
+  useEffect(() => {
+    const tick = setInterval(() => setNow(new Date()), 30_000)
+    const refresh = setInterval(() => load(), 60_000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        setNow(new Date())
+        load()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(tick)
+      clearInterval(refresh)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [load])
+
+  const all = events ?? []
+  const happeningNow = all.filter(
     (e) => new Date(e.starts_at) <= now && new Date(e.ends_at) > now,
   )
-  const later = (events ?? []).filter((e) => new Date(e.starts_at) > now)
+  const later = all.filter((e) => new Date(e.starts_at) > now)
   const shown = tab === 'now' ? happeningNow : later
+
+  function handlePosted(created: FoodEvent) {
+    setPosting(false)
+    setEvents((prev) => [...(prev ?? []), created].sort(
+      (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
+    ))
+    const current = new Date()
+    setNow(current)
+    setTab(new Date(created.starts_at) <= current ? 'now' : 'later')
+    setFreshId(created.id)
+    window.scrollTo({ top: 0 })
+  }
+
+  // In the "later" tab, drop a day header whenever the day changes.
+  // Today's events need no header: the tab name already says it.
+  const rows = shown.map((event, i, arr) => {
+    if (tab !== 'later') return { event, i, day: null as string | null }
+    const day = dayLabel(event.starts_at, now)
+    const prevDay = i > 0 ? dayLabel(arr[i - 1].starts_at, now) : 'Today'
+    return { event, i, day: day !== 'Today' && day !== prevDay ? day : null }
+  })
 
   return (
     <div className="screen">
@@ -76,7 +108,7 @@ function App() {
           onClick={() => setTab('now')}
         >
           Happening now
-          <span className="tally">{events ? happeningNow.length : '–'}</span>
+          <span className="tally">{events ? happeningNow.length : '…'}</span>
         </button>
         <button
           type="button"
@@ -85,16 +117,16 @@ function App() {
           onClick={() => setTab('later')}
         >
           Later today
-          <span className="tally">{events ? later.length : '–'}</span>
+          <span className="tally">{events ? later.length : '…'}</span>
         </button>
       </nav>
 
-      <main className="list-wrap">
+      <main className="list-wrap" aria-live="polite">
         {error && (
           <div className="block block--alert" role="alert">
             <p className="block__title">Couldn't load events</p>
             <p className="block__body">{error}</p>
-            <button type="button" className="btn btn--ghost" onClick={() => location.reload()}>
+            <button type="button" className="btn btn--ghost btn--on-ink" onClick={() => load()}>
               Try again
             </button>
           </div>
@@ -115,16 +147,20 @@ function App() {
         {!error && events !== null && shown.length === 0 && (
           <div className="block block--empty">
             <p className="block__title">
-              {tab === 'now' ? 'Nothing out right now.' : 'Nothing else lined up today.'}
+              {tab === 'now' ? 'Nothing out right now.' : 'Nothing else lined up.'}
             </p>
             <p className="block__body">
               {tab === 'now' && later.length > 0
-                ? `But ${later.length} event${later.length > 1 ? 's are' : ' is'} coming up later.`
+                ? `${later.length} ${later.length === 1 ? 'event is' : 'events are'} coming up later.`
                 : 'Know about free food? Be the one who posts it.'}
             </p>
-            {tab === 'now' && later.length > 0 && (
+            {tab === 'now' && later.length > 0 ? (
               <button type="button" className="btn btn--ghost" onClick={() => setTab('later')}>
                 See what's later
+              </button>
+            ) : (
+              <button type="button" className="btn btn--ghost" onClick={() => setPosting(true)}>
+                Post food
               </button>
             )}
           </div>
@@ -132,36 +168,17 @@ function App() {
 
         {!error && events !== null && shown.length > 0 && (
           <ul className="list">
-            {shown.map((event) => (
-              <li key={event.id} className="event">
-                <div className="event__time">
-                  <span className="event__range">{timeRange(event.starts_at, event.ends_at)}</span>
-                  {tab === 'now' ? (
-                    <span className="flag">
-                      {Math.max(minutesLeft(event.ends_at, now), 0)} min left
-                    </span>
-                  ) : (
-                    <span className="event__day">{dayLabel(event.starts_at, now)}</span>
-                  )}
-                </div>
-                <h2 className="event__title">{event.title}</h2>
-                <dl className="event__facts">
-                  <div>
-                    <dt>Where</dt>
-                    <dd>{event.location}</dd>
-                  </div>
-                  <div>
-                    <dt>Food</dt>
-                    <dd>{event.food}</dd>
-                  </div>
-                  {event.host && (
-                    <div>
-                      <dt>Host</dt>
-                      <dd>{event.host}</dd>
-                    </div>
-                  )}
-                </dl>
-              </li>
+            {rows.map(({ event, i, day }) => (
+              <Fragment key={event.id}>
+                {day && <li className="day-head">{day}</li>}
+                <EventRow
+                  event={event}
+                  now={now}
+                  live={tab === 'now'}
+                  index={i}
+                  fresh={event.id === freshId}
+                />
+              </Fragment>
             ))}
           </ul>
         )}
@@ -171,30 +188,7 @@ function App() {
         Post food
       </button>
 
-      {posting && <PostSheet onClose={() => setPosting(false)} />}
-    </div>
-  )
-}
-
-/** v0 placeholder: real layout and states, but the fields aren't wired to the API yet. */
-function PostSheet({ onClose }: { onClose: () => void }) {
-  return (
-    <div className="sheet" role="dialog" aria-modal="true" aria-label="Post free food">
-      <div className="sheet__bar">
-        <p className="sheet__title">Post food</p>
-        <button type="button" className="btn btn--ghost" onClick={onClose}>
-          Close
-        </button>
-      </div>
-      <div className="sheet__body">
-        <p className="placeholder">[form fields — v0 placeholder]</p>
-        <p className="placeholder placeholder--note">
-          Title · Location · Food · Host (optional) · Start · End
-        </p>
-        <button type="button" className="btn btn--solid" disabled>
-          Post it (not wired yet)
-        </button>
-      </div>
+      {posting && <PostSheet onClose={() => setPosting(false)} onPosted={handlePosted} />}
     </div>
   )
 }
