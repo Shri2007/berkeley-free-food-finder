@@ -9,5 +9,9 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:3001',
     },
+    // Let the dev server read ../shared, where the zod schema lives.
+    fs: {
+      allow: ['..'],
+    },
   },
 })

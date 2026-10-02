@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
-import { createEvent, type FoodEvent } from './api'
+import { LIMITS } from '../../shared/limits'
+import { ApiError, createEvent, type FoodEvent } from './api'
 import { fromBerkeleyInput, roundDownTo5, toBerkeleyInput } from './time'
 
 interface Props {
@@ -88,7 +89,23 @@ export function PostSheet({ onClose, onPosted }: Props) {
       })
       onPosted(created)
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Something went wrong')
+      if (err instanceof ApiError && err.status === 400 && err.fields) {
+        // The server's zod check disagreed with something. Show it on the field.
+        const f = err.fields
+        setErrors({
+          title: f.title,
+          location: f.location,
+          food: f.food,
+          starts: f.starts_at,
+          ends: f.ends_at,
+        })
+        setSubmitError(f.form ?? f.host ?? null)
+      } else if (err instanceof ApiError && err.status === 429) {
+        const mins = Math.ceil((err.retryAfterSeconds ?? 60) / 60)
+        setSubmitError(`${err.message} (about ${mins} min)`)
+      } else {
+        setSubmitError(err instanceof Error ? err.message : 'Something went wrong')
+      }
       setBusy(false)
     }
   }
@@ -122,7 +139,7 @@ export function PostSheet({ onClose, onPosted }: Props) {
         <div className="sheet__body">
           {submitError && (
             <p className="form-alert" role="alert">
-              Couldn't post it: {submitError}. Try again?
+              {submitError}
             </p>
           )}
 
@@ -133,7 +150,7 @@ export function PostSheet({ onClose, onPosted }: Props) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoComplete="off"
-              maxLength={80}
+              maxLength={LIMITS.title}
               placeholder="Leftover pizza from the CSUA meeting"
               {...field('title')}
             />
@@ -151,7 +168,7 @@ export function PostSheet({ onClose, onPosted }: Props) {
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               autoComplete="off"
-              maxLength={80}
+              maxLength={LIMITS.location}
               placeholder="Soda Hall 306"
               {...field('location')}
             />
@@ -169,7 +186,7 @@ export function PostSheet({ onClose, onPosted }: Props) {
               value={food}
               onChange={(e) => setFood(e.target.value)}
               autoComplete="off"
-              maxLength={80}
+              maxLength={LIMITS.food}
               placeholder="Pizza, two veggie"
               {...field('food')}
             />
@@ -189,7 +206,7 @@ export function PostSheet({ onClose, onPosted }: Props) {
               value={host}
               onChange={(e) => setHost(e.target.value)}
               autoComplete="off"
-              maxLength={60}
+              maxLength={LIMITS.host}
               placeholder="CSUA"
             />
           </div>

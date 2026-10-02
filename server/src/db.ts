@@ -51,7 +51,8 @@ export async function listEvents(): Promise<EventRow[]> {
     `SELECT id, title, location, food, host, starts_at, ends_at, created_at
        FROM events
       WHERE ends_at > now()
-      ORDER BY starts_at`
+      ORDER BY starts_at
+      LIMIT 200`
   );
   return result.rows;
 }

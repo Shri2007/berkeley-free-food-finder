@@ -8,7 +8,7 @@ Someone posts when and where there's free food, and everyone else sees what's ha
 - **Berkeley time everywhere.** Times are stored in UTC and always shown in `America/Los_Angeles`, whatever time zone your device is set to.
 
 > **Status: working v1.** You can see what's happening now, what's coming up, and post an event from your phone.
-> The server still has **no input validation or rate limiting**, so don't share a live URL widely until those are in.
+> Posts are validated on the server (zod) and rate limited to 3 per hour per IP.
 
 ## Stack
 
@@ -17,6 +17,7 @@ Someone posts when and where there's free food, and everyone else sees what's ha
 | Frontend (`client/`) | Vite + React + TypeScript, plain CSS (mobile-first) |
 | Backend (`server/`) | Node + Express 4 + TypeScript, run with `tsx` |
 | Database | Postgres on [Neon](https://neon.tech), via the `pg` library (no ORM) |
+| Validation (`shared/`) | One zod schema, used by the server to reject bad posts and by the client for the same limits |
 | Hosting | One service on [Render](https://render.com): Express serves both the API and the built React app |
 
 ## Project layout
@@ -33,10 +34,14 @@ berkeley-free-food-finder/
 │       └── index.css      all styling, plain CSS, light and dark
 ├── server/            Express API
 │   └── src/
-│       ├── server.ts  entry point: creates the table, then starts listening
-│       ├── app.ts     createApp(): routes, and serves client/dist in production
-│       ├── db.ts      all database access (pg Pool, SQL queries)
-│       └── env.ts     loads DATABASE_URL from ../.env.local
+│       ├── server.ts     entry point: creates the table, then starts listening
+│       ├── app.ts        createApp(): routes, validation, limits; serves client/dist in production
+│       ├── db.ts         all database access (pg Pool, SQL queries)
+│       ├── rateLimit.ts  small in-memory per-IP limiter
+│       └── env.ts        loads DATABASE_URL from ../.env.local
+├── shared/
+│   ├── events.ts      the zod schema for a new event (server-side validation)
+│   └── limits.ts      field length and time limits (imported by both sides)
 ├── neon.ts            Neon CLI config (not used by the app itself)
 └── package.json       root build/start scripts for production
 ```
@@ -61,7 +66,7 @@ One table, `events`, created automatically when the server starts:
 | Method | Path | What it does |
 |---|---|---|
 | `GET` | `/api/events` | Events that haven't ended yet, sorted by start time |
-| `POST` | `/api/events` | Creates an event from a JSON body and returns `201` with the new row |
+| `POST` | `/api/events` | Creates an event from a JSON body and returns `201` with the new row. `400` with a `fields` object if something's invalid, `429` after 3 posts in an hour from one IP |
 | `GET` | `/api/health` | Returns `{ "ok": true }`. Doesn't touch the database, so hosts can use it as a liveness check |
 
 Example:
@@ -84,19 +89,25 @@ You need Node.js (24 is what production uses; newer works too) and a Neon Postgr
 
    (If you use the Neon CLI, `neon link` writes this file for you.) `.env.local` is gitignored, so never commit it.
 
-2. **Start the API** (port 3001):
+2. **Install the shared schema's dependency** (once):
+
+   ```bash
+   cd shared && npm install
+   ```
+
+3. **Start the API** (port 3001):
 
    ```bash
    cd server && npm install && npm run dev
    ```
 
-3. **Start the frontend** in a second terminal (port 5173):
+4. **Start the frontend** in a second terminal (port 5173):
 
    ```bash
    cd client && npm install && npm run dev
    ```
 
-4. Open http://localhost:5173. In dev, Vite forwards `/api/*` requests to the API on port 3001.
+5. Open http://localhost:5173. In dev, Vite forwards `/api/*` requests to the API on port 3001.
 
 ## Production
 
