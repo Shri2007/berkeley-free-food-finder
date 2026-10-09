@@ -1,8 +1,9 @@
 import { fileURLToPath } from "node:url";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { eventInputSchema, fieldErrors } from "../../shared/events";
-import { createEvent, listEvents } from "./db";
+import { createEvent, findLiveDuplicate, listEvents } from "./db";
 import { rateLimit } from "./rateLimit";
+import { securityHeaders } from "./securityHeaders";
 
 // The built React app (from `npm run build` at the project root), resolved relative to this file.
 const clientDist = fileURLToPath(new URL("../../client/dist", import.meta.url));
@@ -20,16 +21,18 @@ export function createApp() {
     app.set("trust proxy", 1);
   }
 
+  app.use(securityHeaders);
+
   // Events are a few short strings; anything bigger than this is not a real post.
   app.use(express.json({ limit: "10kb" }));
 
-  // A soft ceiling on all API traffic per IP, mostly to blunt scraping and mistakes.
-  app.use(
-    "/api",
-    rateLimit({ windowMs: 60_000, max: 120, message: "Too many requests. Slow down a little." }),
-  );
-
-  // Posting is the one thing worth spamming, so it gets its own tight budget.
+  // Per-IP budgets. Reads get a generous one (a phone polling every minute is
+  // nowhere near it; a scraper hammering the list is). Posting gets a tight one.
+  const readLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 60,
+    message: "Too many requests. Slow down a little.",
+  });
   const postLimiter = rateLimit({
     windowMs: 60 * 60_000,
     max: 3,
@@ -41,7 +44,7 @@ export function createApp() {
     res.json({ ok: true });
   });
 
-  app.get("/api/events", async (_req: Request, res: Response, next: NextFunction) => {
+  app.get("/api/events", readLimiter, async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const events = await listEvents();
       res.json(events);
@@ -52,13 +55,26 @@ export function createApp() {
 
   app.post("/api/events", postLimiter, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // The schema strips unknown keys and trims strings, so only clean,
-      // size-limited values reach the database.
+      // The schema strips unknown keys, trims strings, and rejects markup,
+      // links, control characters and gibberish, so only clean, size-limited
+      // values reach the database.
       const parsed = eventInputSchema.safeParse(req.body);
       if (!parsed.success) {
         res.status(400).json({ error: "Invalid event", fields: fieldErrors(parsed.error) });
         return;
       }
+
+      // Same title at the same place while the first one is still live is a
+      // double post (or a bot replaying), not a new event.
+      const existing = await findLiveDuplicate(parsed.data.title, parsed.data.location);
+      if (existing) {
+        res.status(409).json({
+          error: "Looks like that's already posted. It's on the board until it ends.",
+          existingId: existing.id,
+        });
+        return;
+      }
+
       const created = await createEvent(parsed.data);
       res.status(201).json(created);
     } catch (err) {

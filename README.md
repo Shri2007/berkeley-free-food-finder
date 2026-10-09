@@ -7,8 +7,23 @@ Someone posts when and where there's free food, and everyone else sees what's ha
 - **Posts disappear by themselves.** Once an event's end time passes, it drops off the list. Nothing gets deleted: the list query only returns events where `ends_at > now()`.
 - **Berkeley time everywhere.** Times are stored in UTC and always shown in `America/Los_Angeles`, whatever time zone your device is set to.
 
-> **Status: working v1.** You can see what's happening now, what's coming up, and post an event from your phone.
-> Posts are validated on the server (zod) and rate limited to 3 per hour per IP.
+> **Status: working v1.** You can see what's happening now, what's coming up, and post an event from your phone or the side panel on a laptop.
+
+## Abuse protection
+
+There are no accounts, so the server has to assume every request could be a bot. What's in place:
+
+| Layer | What it does |
+|---|---|
+| Rate limits (per IP, in memory) | `GET /api/events`: 60 per minute. `POST /api/events`: 3 per hour. Over the limit returns `429` with a `Retry-After` header. |
+| Validation (`shared/events.ts`) | Required fields, length caps, ISO dates, end after start, max 12 hours long, max 7 days ahead. |
+| Content filtering | Rejects `<` and `>` (no markup ever stored), control characters, anything that looks like a link, and keyboard-mash gibberish. |
+| Duplicate check | Same title at the same location while the first post is still live returns `409`. |
+| Body limit | JSON bodies over 10 kB are refused. |
+| Security headers | Strict `Content-Security-Policy` (same-origin only, no inline scripts), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, and HSTS when served over HTTPS. |
+| Error responses | Clients only ever see `Invalid event`, `Invalid request body`, or `Internal server error`. Details stay in the server log. |
+
+The rate limiter keeps its counts in the Node process, which is fine for one instance. If the app ever runs on several, move the counts to the database or a shared store.
 
 ## Stack
 
@@ -26,18 +41,20 @@ Someone posts when and where there's free food, and everyone else sees what's ha
 berkeley-free-food-finder/
 ├── client/            React app (Vite)
 │   └── src/
-│       ├── App.tsx        loads events, "Happening now" / "Later today" tabs, states
-│       ├── EventRow.tsx   one event in the list
-│       ├── PostSheet.tsx  the posting form (bottom sheet on phones, dialog on laptops)
+│       ├── App.tsx        loads events, tabs, states, two-column layout
+│       ├── EventRow.tsx   one event in the feed
+│       ├── PostForm.tsx   the posting form (side panel on laptops)
+│       ├── PostSheet.tsx  the same form in a bottom sheet on phones
 │       ├── api.ts         the two fetch calls to the server
 │       ├── time.ts        Berkeley-time formatting and datetime-local conversion
-│       └── index.css      all styling, plain CSS, light and dark
+│       └── index.css      all styling, plain CSS
 ├── server/            Express API
 │   └── src/
 │       ├── server.ts     entry point: creates the table, then starts listening
 │       ├── app.ts        createApp(): routes, validation, limits; serves client/dist in production
 │       ├── db.ts         all database access (pg Pool, SQL queries)
 │       ├── rateLimit.ts  small in-memory per-IP limiter
+│       ├── securityHeaders.ts  CSP and friends on every response
 │       └── env.ts        loads DATABASE_URL from ../.env.local
 ├── shared/
 │   ├── events.ts      the zod schema for a new event (server-side validation)

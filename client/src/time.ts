@@ -59,6 +59,17 @@ export function dayLabel(startsAt: string, now: Date) {
   return dayFmt.format(start)
 }
 
+/** "just now", "3m ago", "2h ago", "yesterday". For the posted-at metadata line. */
+export function timeAgo(iso: string, now: Date) {
+  const mins = Math.floor((now.getTime() - new Date(iso).getTime()) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return days === 1 ? 'yesterday' : `${days}d ago`
+}
+
 /** Minutes left until an event ends, rounded down. */
 export function minutesLeft(endsAt: string, now: Date) {
   return Math.floor((new Date(endsAt).getTime() - now.getTime()) / 60000)

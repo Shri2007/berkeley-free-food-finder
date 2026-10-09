@@ -57,6 +57,23 @@ export async function listEvents(): Promise<EventRow[]> {
   return result.rows;
 }
 
+/**
+ * Is there already a live (not yet ended) event with this title at this place?
+ * Case-insensitive, so "Pizza" and "pizza" count as the same post.
+ */
+export async function findLiveDuplicate(title: string, location: string): Promise<EventRow | null> {
+  const result = await pool.query<EventRow>(
+    `SELECT id, title, location, food, host, starts_at, ends_at, created_at
+       FROM events
+      WHERE lower(title) = lower($1)
+        AND lower(location) = lower($2)
+        AND ends_at > now()
+      LIMIT 1`,
+    [title, location]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function createEvent(event: NewEvent): Promise<EventRow> {
   const result = await pool.query<EventRow>(
     `INSERT INTO events (title, location, food, host, starts_at, ends_at)
