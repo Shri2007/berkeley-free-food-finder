@@ -1,47 +1,60 @@
+import { createHash } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
+import { pruneRateLimits, recordHit } from "./db";
 
 interface Options {
-  /** Length of the sliding window in milliseconds. */
-  windowMs: number;
-  /** Requests allowed per IP inside one window. */
+  /** Name for this limit, so different limits keep separate counts. */
+  bucket: string;
+  /** Length of the window in seconds. */
+  windowSeconds: number;
+  /** Requests allowed per client inside one window. */
   max: number;
   /** Message sent with the 429. */
   message: string;
 }
 
 /**
- * Small in-memory sliding-window limiter keyed by client IP.
- * Good for one server process (which is what we run). If the app ever runs on
- * several instances, the counts need to live somewhere shared instead.
+ * The visitor's IP. On Vercel we read the header Vercel itself sets, which it
+ * overwrites on every request so a client can't spoof it. Everywhere else
+ * Express's req.ip is right (with `trust proxy` set for Render-style hosts).
  */
-export function rateLimit({ windowMs, max, message }: Options) {
-  const hits = new Map<string, number[]>();
+function clientIp(req: Request): string {
+  if (process.env.VERCEL) {
+    const header = req.headers["x-vercel-forwarded-for"];
+    const value = Array.isArray(header) ? header[0] : header;
+    if (value) return value.split(",")[0].trim();
+  }
+  return req.ip ?? "unknown";
+}
 
-  // Drop stale entries now and then so the map can't grow forever.
-  const sweeper = setInterval(() => {
-    const cutoff = Date.now() - windowMs;
-    for (const [ip, times] of hits) {
-      const fresh = times.filter((t) => t > cutoff);
-      if (fresh.length === 0) hits.delete(ip);
-      else hits.set(ip, fresh);
+/** We only need to tell clients apart, not know who they are, so store a hash. */
+function clientKey(req: Request): string {
+  return createHash("sha256").update(clientIp(req)).digest("hex").slice(0, 32);
+}
+
+/**
+ * Fixed-window rate limiter backed by the rate_limits table.
+ * Shared across every server instance, and survives restarts.
+ */
+export function rateLimit({ bucket, windowSeconds, max, message }: Options) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { hits, retryAfterSeconds } = await recordHit(bucket, clientKey(req), windowSeconds);
+
+      // Housekeeping on roughly 1 in 50 requests keeps the table small
+      // without needing a cron job.
+      if (Math.random() < 0.02) {
+        pruneRateLimits().catch((err) => console.error("rate limit prune failed:", err));
+      }
+
+      if (hits > max) {
+        res.set("Retry-After", String(retryAfterSeconds));
+        res.status(429).json({ error: message, retryAfterSeconds });
+        return;
+      }
+      next();
+    } catch (err) {
+      next(err);
     }
-  }, windowMs);
-  sweeper.unref(); // don't keep the process alive just for this
-
-  return (req: Request, res: Response, next: NextFunction) => {
-    const now = Date.now();
-    const ip = req.ip ?? "unknown";
-    const recent = (hits.get(ip) ?? []).filter((t) => t > now - windowMs);
-
-    if (recent.length >= max) {
-      const retryAfterSeconds = Math.max(1, Math.ceil((recent[0] + windowMs - now) / 1000));
-      res.set("Retry-After", String(retryAfterSeconds));
-      res.status(429).json({ error: message, retryAfterSeconds });
-      return;
-    }
-
-    recent.push(now);
-    hits.set(ip, recent);
-    next();
   };
 }

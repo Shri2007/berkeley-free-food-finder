@@ -15,7 +15,7 @@ There are no accounts, so the server has to assume every request could be a bot.
 
 | Layer | What it does |
 |---|---|
-| Rate limits (per IP, in memory) | `GET /api/events`: 60 per minute. `POST /api/events`: 3 per hour. Over the limit returns `429` with a `Retry-After` header. |
+| Rate limits (per IP, stored in Postgres) | `GET /api/events`: 60 per minute. `POST /api/events`: 3 per hour. Over the limit returns `429` with a `Retry-After` header. |
 | Validation (`shared/events.ts`) | Required fields, length caps, ISO dates, end after start, max 12 hours long, max 7 days ahead. |
 | Content filtering | Rejects `<` and `>` (no markup ever stored), control characters, anything that looks like a link, and keyboard-mash gibberish. |
 | Duplicate check | Same title at the same location while the first post is still live returns `409`. |
@@ -23,7 +23,7 @@ There are no accounts, so the server has to assume every request could be a bot.
 | Security headers | Strict `Content-Security-Policy` (same-origin only, no inline scripts), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, and HSTS when served over HTTPS. |
 | Error responses | Clients only ever see `Invalid event`, `Invalid request body`, or `Internal server error`. Details stay in the server log. |
 
-The rate limiter keeps its counts in the Node process, which is fine for one instance. If the app ever runs on several, move the counts to the database or a shared store.
+The rate limiter keeps its counts in a `rate_limits` table, so every server instance shares them and they survive restarts. That matters on Vercel, which runs several copies of the API at once and recycles them often; an in-memory counter there would let each copy count separately. Clients are stored as a SHA-256 hash of the IP, never the raw address, and old counter rows are pruned automatically. Windows are fixed (for example 1:00 to 2:00), so someone could squeeze in 3 posts just before the hour and 3 just after.
 
 ## Stack
 
@@ -33,7 +33,7 @@ The rate limiter keeps its counts in the Node process, which is fine for one ins
 | Backend (`server/`) | Node + Express 4 + TypeScript, run with `tsx` |
 | Database | Postgres on [Neon](https://neon.tech), via the `pg` library (no ORM) |
 | Validation (`shared/`) | One zod schema, used by the server to reject bad posts and by the client for the same limits |
-| Hosting | One service on [Render](https://render.com): Express serves both the API and the built React app |
+| Hosting | [Vercel](https://vercel.com): the React app on Vercel's CDN, the Express API as one Vercel Function |
 
 ## Project layout
 
@@ -49,17 +49,21 @@ berkeley-free-food-finder/
 │       ├── time.ts        Berkeley-time formatting and datetime-local conversion
 │       └── index.css      all styling, plain CSS
 ├── server/            Express API
+│   ├── scripts/
+│   │   └── build-vercel.ts  writes .vercel/output for deployment
 │   └── src/
-│       ├── server.ts     entry point: creates the table, then starts listening
+│       ├── server.ts     entry point: creates the tables, then starts listening
 │       ├── app.ts        createApp(): routes, validation, limits; serves client/dist in production
 │       ├── db.ts         all database access (pg Pool, SQL queries)
-│       ├── rateLimit.ts  small in-memory per-IP limiter
+│       ├── vercel.ts     entry point when running as a Vercel Function
+│       ├── rateLimit.ts  per-IP limiter, counts stored in Postgres
 │       ├── securityHeaders.ts  CSP and friends on every response
 │       └── env.ts        loads DATABASE_URL from ../.env.local
 ├── shared/
 │   ├── events.ts      the zod schema for a new event (server-side validation)
 │   └── limits.ts      field length and time limits (imported by both sides)
 ├── neon.ts            Neon CLI config (not used by the app itself)
+├── vercel.json        tells Vercel which build command to run
 └── package.json       root build/start scripts for production
 ```
 
@@ -126,26 +130,36 @@ You need Node.js (24 is what production uses; newer works too) and a Neon Postgr
 
 5. Open http://localhost:5173. In dev, Vite forwards `/api/*` requests to the API on port 3001.
 
-## Production
+## Deploying on Vercel
 
-In production it all runs as **one** Node process. Express serves the API *and* the built React files.
-
-```bash
-npm run build   # installs server + client deps, builds client/dist
-npm start       # starts Express with NODE_ENV=production
-```
-
-### Deploying on Render
-
-Create a **Web Service** from this repo with:
+The repo is set up for Vercel's Hobby (free) plan. Connect the GitHub repo, add one environment variable, deploy.
 
 | Setting | Value |
 |---|---|
-| Build Command | `npm run build` |
-| Start Command | `npm start` |
-| Region | Oregon (same region as the Neon database) |
+| Framework Preset | Other (`vercel.json` already sets this) |
+| Build Command | `npm run build:vercel` (also set by `vercel.json`) |
+| Root Directory | *(leave blank)* |
 | Environment variable | `DATABASE_URL` = your Neon connection string |
+| Function region (Settings, Functions) | Portland, USA (West), `pdx1`, so the API sits next to the Neon database in Oregon |
 
-Render sets `PORT` automatically, and the Node version comes from `engines` in `package.json` (24.x).
+Node version comes from `engines` in `package.json` (24.x).
 
-**Heads-up on the free tier:** Render puts free services to sleep after 15 minutes without traffic. The next visit then takes about a minute to wake it up.
+**How the build works.** `npm run build:vercel` builds the client, then `server/scripts/build-vercel.ts` writes Vercel's [Build Output API](https://vercel.com/docs/build-output-api) folder directly:
+
+```
+.vercel/output/
+  config.json          routing, plus the same security headers Express sends
+  static/              client/dist, served from Vercel's CDN
+  functions/api.func/  the Express app bundled by esbuild into one file
+```
+
+Writing this folder ourselves (instead of letting Vercel guess) means the exact thing Vercel runs can be built and tested locally, and our `server/` + `client/` + `shared/` layout doesn't need to match Vercel's zero-config conventions.
+
+### Running as a single Node server instead
+
+`npm start` still works anywhere that runs a long-lived Node process (Render, Railway, a VPS): Express serves both the API and the built client.
+
+```bash
+npm run build   # installs shared + server + client deps, builds client/dist
+npm start       # starts Express with NODE_ENV=production
+```

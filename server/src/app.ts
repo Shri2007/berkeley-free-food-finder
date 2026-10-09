@@ -29,12 +29,14 @@ export function createApp() {
   // Per-IP budgets. Reads get a generous one (a phone polling every minute is
   // nowhere near it; a scraper hammering the list is). Posting gets a tight one.
   const readLimiter = rateLimit({
-    windowMs: 60_000,
+    bucket: "read",
+    windowSeconds: 60,
     max: 60,
     message: "Too many requests. Slow down a little.",
   });
   const postLimiter = rateLimit({
-    windowMs: 60 * 60_000,
+    bucket: "post",
+    windowSeconds: 60 * 60,
     max: 3,
     message: "You've posted 3 times in the last hour. Try again a bit later.",
   });
@@ -82,9 +84,9 @@ export function createApp() {
     }
   });
 
-  // In production, Express serves the client too, so the whole app is one service.
-  // In dev, Vite serves the client on :5173 instead.
-  if (process.env.NODE_ENV === "production") {
+  // When run as one Node server (`npm start`), Express serves the client too.
+  // On Vercel the CDN serves it instead, and in dev Vite does.
+  if (process.env.NODE_ENV === "production" && !process.env.VERCEL) {
     app.use(express.static(clientDist));
   }
 

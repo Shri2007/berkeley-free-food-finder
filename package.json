@@ -1,6 +1,7 @@
 {
   "scripts": {
     "build": "npm ci --prefix shared && npm ci --prefix server && npm ci --include=dev --prefix client && npm run build --prefix client",
+    "build:vercel": "npm run build && npm run build:vercel --prefix server",
     "start": "NODE_ENV=production npm start --prefix server"
   },
   "engines": {

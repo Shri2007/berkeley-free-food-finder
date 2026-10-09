@@ -15,20 +15,29 @@ const CSP = [
   "frame-ancestors 'none'",
 ].join("; ");
 
-/** Standard browser-hardening headers on every response, API and static alike. */
-export function securityHeaders(req: Request, res: Response, next: NextFunction) {
-  res.set({
-    "Content-Security-Policy": CSP,
-    "X-Content-Type-Options": "nosniff", // don't guess MIME types
-    "X-Frame-Options": "DENY", // belt and braces with frame-ancestors
-    "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
-    "Cross-Origin-Opener-Policy": "same-origin",
-  });
+/**
+ * The browser-hardening headers, as plain data. Express sends these on every
+ * response it serves; the Vercel build copies the same set into the CDN
+ * routing config so the static page gets them too. One list, two consumers.
+ */
+export const SECURITY_HEADERS: Record<string, string> = {
+  "Content-Security-Policy": CSP,
+  "X-Content-Type-Options": "nosniff", // don't guess MIME types
+  "X-Frame-Options": "DENY", // belt and braces with frame-ancestors
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
 
-  // Only promise HTTPS when we're actually behind TLS (Render terminates it for us).
+export const HSTS = "max-age=15552000; includeSubDomains";
+
+/** Standard browser-hardening headers on every response Express serves. */
+export function securityHeaders(req: Request, res: Response, next: NextFunction) {
+  res.set(SECURITY_HEADERS);
+
+  // Only promise HTTPS when we're actually behind TLS (the host terminates it for us).
   if (process.env.NODE_ENV === "production" && req.secure) {
-    res.set("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+    res.set("Strict-Transport-Security", HSTS);
   }
 
   next();
